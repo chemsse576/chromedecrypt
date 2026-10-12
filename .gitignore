@@ -1,0 +1,21 @@
+# Build outputs
+build/
+output/
+*.obj
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Sensitive
+*.key
+*.pfx
+*.json
+
+# Misc
+__pycache__/
+*.pyc
+Thumbs.db
+.DS_Store
