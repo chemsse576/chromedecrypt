@@ -20,6 +20,7 @@ typedef struct _BROWSER_CONFIG {
     CLSID           clsid;
     IID             iid_v1;             // IElevator
     IID             iid_v2;             // IElevator2
+    IID             iid_v3;             // IElevator3 (Edge 157+)
     int             decrypt_vtable_idx; // absolute vtable index for DecryptData
 } BROWSER_CONFIG;
 
