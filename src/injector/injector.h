@@ -9,6 +9,7 @@ typedef struct _INJECT_CTX {
     char        output_dir[MAX_PATH];
     char        chrome_path[MAX_PATH];
     char        dll_temp_path[MAX_PATH];
+    char        pipe_name[128];
     HANDLE      hProcess;
     HANDLE      hThread;
     DWORD       pid;

