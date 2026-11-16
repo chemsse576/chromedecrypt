@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
 
     INJECT_CTX ctx = {0};
     ctx.browser = BROWSER_CHROME;
-    strcpy(ctx.output_dir, ".\\output");
+    GetFullPathNameA(".\\output", MAX_PATH, ctx.output_dir, NULL);
     char payload_path[MAX_PATH] = "payload.dll";
     BOOL do_kill = FALSE;
 
@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
             else
                 ctx.browser = BROWSER_CHROME;
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-            strncpy(ctx.output_dir, argv[++i], MAX_PATH - 1);
+            GetFullPathNameA(argv[++i], MAX_PATH, ctx.output_dir, NULL);
         } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             strncpy(payload_path, argv[++i], MAX_PATH - 1);
         } else if (strcmp(argv[i], "-k") == 0) {
