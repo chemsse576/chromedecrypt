@@ -16,6 +16,7 @@ typedef enum _BROWSER_ID {
 typedef struct _BROWSER_CONFIG {
     const wchar_t*  name;
     const wchar_t*  user_data_path;     // relative to %LOCALAPPDATA%
+    const wchar_t*  service_name;       // elevation service name for dynamic CLSID resolution
     CLSID           clsid;
     IID             iid_v1;             // IElevator
     IID             iid_v2;             // IElevator2

